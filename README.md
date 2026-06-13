@@ -154,6 +154,7 @@ At runtime, the flow is:
 
 - Node.js `22.x` recommended
 - npm
+- Python `3.11+` recommended for the remediation and executable model-audit helpers
 
 ### Environment Variables
 
@@ -178,6 +179,7 @@ Notes:
 
 ```bash
 npm install
+pip install -r requirements.txt
 npm run dev
 ```
 
