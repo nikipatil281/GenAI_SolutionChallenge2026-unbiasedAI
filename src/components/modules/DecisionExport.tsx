@@ -3,14 +3,14 @@ import { useAudit } from '../../context/AuditContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { BrainCircuit, AlertOctagon, CheckCircle2, AlertTriangle, FileJson, Info } from 'lucide-react';
+import { BrainCircuit, AlertOctagon, CheckCircle2, AlertTriangle, FileJson, Info, Wand2, FileStack } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 import { apiUrl } from '../../lib/api';
 
 export function DecisionExport() {
-  const { problemFraming, datasetStats, fairnessMetrics, subgroups, governance, systemDecision, setSystemDecision, llmMessages } = useAudit();
+  const { problemFraming, datasetStats, fairnessMetrics, subgroups, governance, systemDecision, setSystemDecision, llmMessages, setActiveModule, remediationResult, saveCurrentVersion, buildCurrentSnapshot, saveSnapshotAsAuditRun, currentAuditRunId, findVersionEntryByAuditRunId, setSelectedVersionId } = useAudit();
   const [loading, setLoading] = useState(false);
   const completedMemoTypes = new Set(llmMessages.map((message) => message.type));
   const decisionReadiness = [
@@ -37,6 +37,7 @@ export function DecisionExport() {
 
       const res = await axios.post(apiUrl('/api/llm/decision'), { context });
       setSystemDecision(res.data);
+      saveSnapshotAsAuditRun(buildCurrentSnapshot({ systemDecision: res.data }));
       toast.success('Final decision recommendation generated.');
     } catch (e: any) {
       toast.error('Failed to generate decision.', { description: e.message });
@@ -50,7 +51,8 @@ export function DecisionExport() {
       fairnessMetrics,
       governance,
       llmMessages,
-      systemDecision
+      systemDecision,
+      remediationResult
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -59,6 +61,29 @@ export function DecisionExport() {
     a.download = 'BiasScope_Audit_Report.json';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleMoveToVersioning = () => {
+    const existingVersion = currentAuditRunId ? findVersionEntryByAuditRunId(currentAuditRunId) : null;
+    if (existingVersion) {
+      const shouldCreateAnother = window.confirm(
+        'This audit run already has an entry in Versioning. Do you want to create another versioning instance for the same document?'
+      );
+      if (!shouldCreateAnother) {
+        setSelectedVersionId(existingVersion.id);
+        setActiveModule('versioning');
+        toast.message('Opened the existing versioning entry for this audit run.');
+        return;
+      }
+    }
+
+    const created = saveCurrentVersion();
+    if (!created) {
+      toast.error('Create the final decision first so BiasScope can save a versioned snapshot.');
+      return;
+    }
+    setActiveModule('versioning');
+    toast.success('Version snapshot saved.', { description: 'The whole audit run is now stored in Versioning for before/after comparison.' });
   };
 
   return (
@@ -140,6 +165,28 @@ export function DecisionExport() {
                     {systemDecision.unresolvedQuestions?.map((act: string, i: number) => <li key={i}>{act}</li>)}
                   </ul>
                </div>
+            </div>
+
+            <div className="rounded-xl border border-[#F27D26]/20 bg-[#F27D26]/5 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="font-semibold text-gray-900">Next step: Safe Data Actions</h4>
+                <p className="text-sm text-gray-700">Open the new post-decision module to preview low-risk dataset transformations with explicit consent gates.</p>
+              </div>
+              <Button variant="outline" onClick={() => setActiveModule('safe-remediation')}>
+                <Wand2 className="w-4 h-4 mr-2" />
+                Open Safe Data Actions
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-[#141414]/15 bg-white p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="font-semibold text-gray-900">Move This Run To Versioning</h4>
+                <p className="text-sm text-gray-700">Save the full audit pipeline state so you can compare this original run against future versions.</p>
+              </div>
+              <Button variant="outline" onClick={handleMoveToVersioning}>
+                <FileStack className="w-4 h-4 mr-2" />
+                Move To Versioning
+              </Button>
             </div>
           </CardContent>
         </Card>

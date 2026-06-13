@@ -10,6 +10,12 @@ import { toast } from 'sonner';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 import { LlmCompanion } from '../ui/llm-companion';
 import { apiUrl } from '../../lib/api';
+import {
+  EVIDENCE_OPTIONS,
+  OVERRIDE_OPTIONS,
+  REVIEWER_OPTIONS,
+  SPEED_OPTIONS,
+} from '../../lib/governanceOptions';
 
 export function Governance() {
   const { governance, setGovernance, addLlmMessage, llmMessages } = useAudit();
@@ -67,9 +73,9 @@ export function Governance() {
             <Select onValueChange={(v) => setGovernance({...governance, reviewerId: v})} value={governance.reviewerId} disabled={governanceLocked}>
               <SelectTrigger className="w-full" disabled={governanceLocked}><SelectValue placeholder="Select reviewer" /></SelectTrigger>
               <SelectContent>
-                 <SelectItem value="expert">Dedicated Domain Expert</SelectItem>
-                 <SelectItem value="worker">Frontline Worker (time constrained)</SelectItem>
-                 <SelectItem value="automated">Fully Automated (no human in loop)</SelectItem>
+                 {REVIEWER_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                 ))}
               </SelectContent>
             </Select>
           </div>
@@ -90,9 +96,9 @@ export function Governance() {
             <Select onValueChange={(v) => setGovernance({...governance, canOverride: v})} value={governance.canOverride} disabled={governanceLocked}>
               <SelectTrigger className="w-full" disabled={governanceLocked}><SelectValue placeholder="Select override policy" /></SelectTrigger>
               <SelectContent>
-                 <SelectItem value="easily">Yes, easily with no penalty</SelectItem>
-                 <SelectItem value="justification">Yes, but requires heavy written justification</SelectItem>
-                 <SelectItem value="no">No</SelectItem>
+                 {OVERRIDE_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                 ))}
               </SelectContent>
             </Select>
           </div>
@@ -113,9 +119,9 @@ export function Governance() {
             <Select onValueChange={(v) => setGovernance({...governance, evidenceShown: v})} value={governance.evidenceShown} disabled={governanceLocked}>
               <SelectTrigger className="w-full" disabled={governanceLocked}><SelectValue placeholder="Select evidence level" /></SelectTrigger>
               <SelectContent>
-                 <SelectItem value="full">Full contextual file + model score</SelectItem>
-                 <SelectItem value="score_only">Only the model score and top 3 factors</SelectItem>
-                 <SelectItem value="none">No insight into model reasoning</SelectItem>
+                 {EVIDENCE_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                 ))}
               </SelectContent>
             </Select>
           </div>
@@ -136,9 +142,9 @@ export function Governance() {
             <Select onValueChange={(v) => setGovernance({...governance, speedOfDecision: v})} value={governance.speedOfDecision} disabled={governanceLocked}>
               <SelectTrigger className="w-full" disabled={governanceLocked}><SelectValue placeholder="Select speed" /></SelectTrigger>
               <SelectContent>
-                 <SelectItem value="seconds">Seconds (High risk of automation bias)</SelectItem>
-                 <SelectItem value="minutes">Minutes</SelectItem>
-                 <SelectItem value="hours">Hours or Days</SelectItem>
+                 {SPEED_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                 ))}
               </SelectContent>
             </Select>
           </div>

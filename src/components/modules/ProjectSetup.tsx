@@ -17,61 +17,166 @@ import { ScrollArea } from '../ui/scroll-area';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 import { LlmCompanion } from '../ui/llm-companion';
 import { apiUrl } from '../../lib/api';
+import { getSampleDatasetById, SAMPLE_DATASETS, type SampleDatasetDefinition } from '../../lib/sampleDatasets';
+import { EMPTY_GOVERNANCE_ANSWERS, getRandomGovernanceAnswers } from '../../lib/governanceOptions';
+
+const DEFAULT_PROBLEM_FRAMING = {
+  taskDescription: '',
+  domain: '',
+  stakeholders: '',
+  humanBaseline: '',
+  benefit: ''
+};
+
+type DataSourceMode = 'upload' | 'sample' | null;
 
 export function ProjectSetup() {
   // Context state
   const { 
     problemFraming, setProblemFraming, addLlmMessage, clearLlmMessages,
     dataset, setDataset, datasetStats, setDatasetStats, setAssociations, setFairnessMetrics, setSubgroups, 
+    setGovernance,
     targetColumn, setTargetColumn, groundTruthColumn, setGroundTruthColumn, 
     protectedColumns, setProtectedColumns, llmMessages, loadingModules, setLoadingModules,
-    clearChatMessages, setSystemDecision
+    clearChatMessages, setSystemDecision, setRemediationPlan, setRemediationPreview, setRemediationResult,
+    clearCurrentAuditRunLink,
+    datasetLabel, setDatasetLabel
   } = useAudit();
   
   // Local loading states
+  const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const [selectedSampleId, setSelectedSampleId] = useState('');
   const [auditLoading, setAuditLoading] = useState(false);
+  const currentSample = selectedSampleId ? getSampleDatasetById(selectedSampleId) : undefined;
+  const showSampleSelector = dataSourceMode === 'sample';
   const projectSetupLocked = auditLoading || Boolean(loadingModules['project-setup']) || llmMessages.some((message) => message.type === 'project-setup');
 
-  // Dataset Handlers
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const resetAuditState = () => {
+    setDatasetStats(null);
+    setAssociations(null);
+    setFairnessMetrics(null);
+    setSubgroups(null);
+    setSystemDecision(null);
+    setRemediationPlan(null);
+    setRemediationPreview(null);
+    setRemediationResult(null);
+    clearCurrentAuditRunLink();
+    clearLlmMessages();
+    clearChatMessages();
+    setLoadingModules({});
+  };
 
-    setUploadLoading(true);
+  const clearDatasetSelection = () => {
+    setDataset(null);
+    setDatasetLabel('Untitled Dataset');
+    setDatasetStats(null);
+    setAssociations(null);
+    setFairnessMetrics(null);
+    setSubgroups(null);
+    setTargetColumn('');
+    setGroundTruthColumn('');
+    setProtectedColumns([]);
+    setGovernance(EMPTY_GOVERNANCE_ANSWERS);
+    setSystemDecision(null);
+    setRemediationPlan(null);
+    setRemediationPreview(null);
+    setRemediationResult(null);
+    clearCurrentAuditRunLink();
+    setProblemFraming(DEFAULT_PROBLEM_FRAMING);
+    clearLlmMessages();
+    clearChatMessages();
+    setLoadingModules({});
+  };
 
-    const processData = async (data: any[]) => {
-      setDataset(data);
-      setDatasetStats(null);
-      setAssociations(null);
-      setFairnessMetrics(null);
-      setSubgroups(null);
+  const activateDataSourceMode = (mode: Exclude<DataSourceMode, null>) => {
+    if (projectSetupLocked) {
+      return;
+    }
+
+    const switchingModes = dataSourceMode !== mode;
+    setDataSourceMode(mode);
+
+    if (mode === 'upload') {
+      setSelectedSampleId('');
+    }
+
+    if (switchingModes) {
+      clearDatasetSelection();
+    }
+  };
+
+  const applySamplePreset = (sampleDefinition: SampleDatasetDefinition) => {
+    setProblemFraming(sampleDefinition.problemFraming);
+    setTargetColumn(sampleDefinition.targetColumn);
+    setGroundTruthColumn(sampleDefinition.groundTruthColumn);
+    setProtectedColumns(sampleDefinition.protectedColumns);
+    setGovernance(getRandomGovernanceAnswers());
+  };
+
+  const applyDataset = async (
+    data: any[],
+    options: {
+      sourceLabel: string;
+      sampleDefinition?: SampleDatasetDefinition;
+    }
+  ) => {
+    if (!data.length) {
+      throw new Error('No rows were found in the selected dataset.');
+    }
+
+    setDataset(data);
+    setDatasetLabel(options.sourceLabel || datasetLabel || 'Untitled Dataset');
+    resetAuditState();
+
+    if (options.sampleDefinition) {
+      applySamplePreset(options.sampleDefinition);
+      toast.success(`${options.sourceLabel} loaded. Questionnaire, key columns, and oversight answers were auto-filled.`);
+    } else {
+      setProblemFraming(DEFAULT_PROBLEM_FRAMING);
       setTargetColumn('');
       setGroundTruthColumn('');
       setProtectedColumns([]);
-      setSystemDecision(null);
-      clearLlmMessages();
-      clearChatMessages();
-      setLoadingModules({});
+      setGovernance(EMPTY_GOVERNANCE_ANSWERS);
       toast.success(`Successfully parsed ${data.length} rows. Analyzing schema...`);
-      
-      // Auto-detect protected attributes
-      try {
-        const columns = Object.keys(data[0] || {});
-        const sampleData = data.slice(0, 3);
-        const res = await axios.post(apiUrl('/api/llm/detect-protected'), { columns, sampleData });
-        
+    }
+
+    try {
+      const columns = Object.keys(data[0] || {});
+      const sampleData = data.slice(0, 3);
+      const res = await axios.post(apiUrl('/api/llm/detect-protected'), { columns, sampleData });
+
+      if (!options.sampleDefinition) {
         if (res.data.protectedCols && res.data.protectedCols.length > 0) {
           setProtectedColumns(res.data.protectedCols);
           toast.success(`Auto-detected protected attribute: ${res.data.protectedCols[0]}`);
         } else {
           toast.info('Could not auto-detect protected attribute. Please select manually.');
         }
-      } catch (err) {
-        console.error("Auto-detect failed", err);
+      } else if (res.data.protectedCols && res.data.protectedCols.length > 0) {
+        toast.message(`Suggested protected attributes detected: ${res.data.protectedCols.join(', ')}`);
       }
+    } catch (err) {
+      console.error("Auto-detect failed", err);
+    }
+  };
+  
+  // Dataset Handlers
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      setUploadLoading(false);
+    activateDataSourceMode('upload');
+    setUploadLoading(true);
+    setSelectedSampleId('');
+
+    const processData = async (data: any[]) => {
+      try {
+        await applyDataset(data, { sourceLabel: file.name });
+      } finally {
+        setUploadLoading(false);
+      }
     };
 
     if (file.name.endsWith('.csv')) {
@@ -108,6 +213,36 @@ export function ProjectSetup() {
     } else {
       toast.error('Unsupported file type. Please upload CSV or Excel.');
       setUploadLoading(false);
+    }
+  };
+
+  const handleSampleSelection = async (sampleId: string) => {
+    activateDataSourceMode('sample');
+    setSelectedSampleId(sampleId);
+    const sampleDefinition = getSampleDatasetById(sampleId);
+    if (!sampleDefinition) {
+      toast.error('Could not find that sample dataset.');
+      return;
+    }
+
+    setSampleLoading(true);
+
+    try {
+      const parsed = Papa.parse(sampleDefinition.csvText, {
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: true,
+      });
+
+      if (parsed.errors.length > 0) {
+        throw new Error(parsed.errors[0].message);
+      }
+
+      await applyDataset(parsed.data as any[], { sourceLabel: sampleDefinition.name, sampleDefinition });
+    } catch (err: any) {
+      toast.error('Failed to load sample dataset.', { description: err.message });
+    } finally {
+      setSampleLoading(false);
     }
   };
 
@@ -200,7 +335,163 @@ export function ProjectSetup() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
         <div className="space-y-6">
 
-      {/* SECTION 1: PROBLEM FRAMING */}
+      {/* SECTION 1: DATASET UPLOAD */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Data Upload & Configuration</CardTitle>
+          <CardDescription>
+            {projectSetupLocked
+              ? 'Upload a CSV file or load a sample dataset, then specify key columns. This section locks once analysis starts.'
+              : 'Upload a CSV file or try a sample dataset, then specify key columns.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex flex-wrap items-center gap-4">
+            <Button
+              variant={dataSourceMode === 'upload' ? 'default' : 'outline'}
+              className="relative cursor-pointer"
+              onClick={() => activateDataSourceMode('upload')}
+              disabled={uploadLoading || sampleLoading || projectSetupLocked}
+            >
+               <Upload className="w-4 h-4 mr-2" />
+               {uploadLoading ? 'Uploading...' : 'Upload CSV / Excel'}
+               <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" disabled={uploadLoading || sampleLoading || projectSetupLocked} />
+            </Button>
+            <Button
+              variant={dataSourceMode === 'sample' ? 'default' : 'secondary'}
+              type="button"
+              onClick={() => activateDataSourceMode('sample')}
+              disabled={uploadLoading || sampleLoading || projectSetupLocked}
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              {sampleLoading ? 'Loading Sample...' : 'Try Sample Data'}
+            </Button>
+            {dataset && (
+              <Badge variant="secondary" className="px-3 py-1 text-sm font-medium">
+                <Database className="w-3 h-3 mr-1" />
+                {dataset.length} rows loaded
+              </Badge>
+            )}
+            {currentSample && (
+              <Badge variant="outline" className="px-3 py-1 text-sm font-medium">
+                <Sparkles className="w-3 h-3 mr-1" />
+                {currentSample.name}
+              </Badge>
+            )}
+          </div>
+
+          {showSampleSelector && (
+            <div className="space-y-2">
+              <Label>Sample Dataset</Label>
+              <Select value={selectedSampleId} onValueChange={handleSampleSelection} disabled={sampleLoading || projectSetupLocked}>
+                <SelectTrigger className="w-full" disabled={sampleLoading || projectSetupLocked}>
+                  <SelectValue placeholder="Choose a sample dataset to auto-fill the audit setup" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SAMPLE_DATASETS.map((sample) => (
+                    <SelectItem key={sample.id} value={sample.id}>
+                      {sample.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {currentSample && (
+                <p className="text-xs text-[#141414]/60">{currentSample.description}</p>
+              )}
+            </div>
+          )}
+
+          {dataset && dataset.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-[#F27D26]">Model Prediction (Target)</label>
+                    <HoverCard>
+                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
+                      <HoverCardContent>
+                        <p className="font-bold mb-1">What this means:</p>
+                        <p className="text-gray-600">The specific column containing the AI's predicted outcome or score.</p>
+                        <p className="font-bold mt-2 mb-1">Example:</p>
+                        <p className="text-gray-600">"Model_Decision" or "Risk Score" (1-100).</p>
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                  <Select value={targetColumn} onValueChange={setTargetColumn} disabled={projectSetupLocked}>
+                    <SelectTrigger className="w-full" disabled={projectSetupLocked}><SelectValue placeholder="Select prediction column" /></SelectTrigger>
+                    <SelectContent>
+                      {Object.keys(dataset[0]).map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-purple-600">Ground Truth Label (Optional)</label>
+                    <HoverCard>
+                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
+                      <HoverCardContent>
+                        <p className="font-bold mb-1">Why provide this?</p>
+                        <p className="text-gray-600">If you have the actual, real-world outcomes, select it here. This unlocks advanced AIF360 Classification Metrics like True Positive Rate and Equal Opportunity.</p>
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                  <Select value={groundTruthColumn} onValueChange={setGroundTruthColumn} disabled={projectSetupLocked}>
+                    <SelectTrigger className="w-full" disabled={projectSetupLocked}><SelectValue placeholder="Select ground truth column" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- None --</SelectItem>
+                      {Object.keys(dataset[0]).map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium">Primary Protected Attribute</label>
+                    <HoverCard>
+                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
+                      <HoverCardContent>
+                        <p className="font-bold mb-1">What this means:</p>
+                        <p className="text-gray-600">The demographic columns used to test if the model is biased against a certain group. You can select multiple!</p>
+                        <p className="font-bold mt-2 mb-1">Example:</p>
+                        <p className="text-gray-600">Race, Gender, Age, or Zip Code.</p>
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                  {protectedColumns.length > 0 && (
+                    <span className="text-[10px] text-green-600 font-bold flex items-center bg-green-100 px-2 py-0.5 rounded-full">
+                      <Sparkles className="w-3 h-3 mr-1" /> {currentSample ? 'Preset' : 'Auto-detected'}
+                    </span>
+                  )}
+                </div>
+                <div className="border rounded-md h-32 overflow-y-auto p-2 space-y-1 bg-white">
+                  {Object.keys(dataset[0]).map(k => (
+                    <label key={k} className={`flex items-center gap-2 text-sm p-1 rounded ${projectSetupLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-50'}`}>
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300"
+                        checked={protectedColumns.includes(k)}
+                        disabled={projectSetupLocked}
+                        onChange={() => {
+                          if (protectedColumns.includes(k)) {
+                            setProtectedColumns(protectedColumns.filter(c => c !== k));
+                          } else {
+                            setProtectedColumns([...protectedColumns, k]);
+                          }
+                        }}
+                      />
+                      {k}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* SECTION 2: PROBLEM FRAMING */}
       <Card>
         <CardHeader>
           <CardTitle>Decision Questionnaire</CardTitle>
@@ -290,121 +581,6 @@ export function ProjectSetup() {
             </div>
             <Textarea id="benefit" value={problemFraming.benefit} onChange={(e) => setProblemFraming({...problemFraming, benefit: e.target.value})} placeholder="e.g. Reduce review time entirely for 80% of applications" disabled={projectSetupLocked} />
           </div>
-        </CardContent>
-      </Card>
-
-      {/* SECTION 2: DATASET UPLOAD */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Upload & Configuration</CardTitle>
-          <CardDescription>
-            {projectSetupLocked
-              ? 'Upload a CSV file and specify key columns. This section locks once analysis starts.'
-              : 'Upload a CSV file and specify key columns'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-4">
-            <Button variant="outline" className="relative cursor-pointer" disabled={uploadLoading || projectSetupLocked}>
-               <Upload className="w-4 h-4 mr-2" />
-               {uploadLoading ? 'Uploading...' : 'Upload CSV / Excel'}
-               <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" disabled={uploadLoading || projectSetupLocked} />
-            </Button>
-            {dataset && (
-              <Badge variant="secondary" className="px-3 py-1 text-sm font-medium">
-                <Database className="w-3 h-3 mr-1" />
-                {dataset.length} rows loaded
-              </Badge>
-            )}
-          </div>
-
-          {dataset && dataset.length > 0 && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-[#F27D26]">Model Prediction (Target)</label>
-                    <HoverCard>
-                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
-                      <HoverCardContent>
-                        <p className="font-bold mb-1">What this means:</p>
-                        <p className="text-gray-600">The specific column containing the AI's predicted outcome or score.</p>
-                        <p className="font-bold mt-2 mb-1">Example:</p>
-                        <p className="text-gray-600">"Model_Decision" or "Risk Score" (1-100).</p>
-                      </HoverCardContent>
-                    </HoverCard>
-                  </div>
-                  <Select value={targetColumn} onValueChange={setTargetColumn} disabled={projectSetupLocked}>
-                    <SelectTrigger disabled={projectSetupLocked}><SelectValue placeholder="Select prediction column" /></SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(dataset[0]).map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-purple-600">Ground Truth Label (Optional)</label>
-                    <HoverCard>
-                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
-                      <HoverCardContent>
-                        <p className="font-bold mb-1">Why provide this?</p>
-                        <p className="text-gray-600">If you have the actual, real-world outcomes, select it here. This unlocks advanced AIF360 Classification Metrics like True Positive Rate and Equal Opportunity.</p>
-                      </HoverCardContent>
-                    </HoverCard>
-                  </div>
-                  <Select value={groundTruthColumn} onValueChange={setGroundTruthColumn} disabled={projectSetupLocked}>
-                    <SelectTrigger disabled={projectSetupLocked}><SelectValue placeholder="Select ground truth column" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">-- None --</SelectItem>
-                      {Object.keys(dataset[0]).map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium">Primary Protected Attribute</label>
-                    <HoverCard>
-                      <HoverCardTrigger><Info className="w-4 h-4 text-gray-500 hover:text-black cursor-help" /></HoverCardTrigger>
-                      <HoverCardContent>
-                        <p className="font-bold mb-1">What this means:</p>
-                        <p className="text-gray-600">The demographic columns used to test if the model is biased against a certain group. You can select multiple!</p>
-                        <p className="font-bold mt-2 mb-1">Example:</p>
-                        <p className="text-gray-600">Race, Gender, Age, or Zip Code.</p>
-                      </HoverCardContent>
-                    </HoverCard>
-                  </div>
-                  {protectedColumns.length > 0 && (
-                    <span className="text-[10px] text-green-600 font-bold flex items-center bg-green-100 px-2 py-0.5 rounded-full">
-                      <Sparkles className="w-3 h-3 mr-1" /> Auto-detected
-                    </span>
-                  )}
-                </div>
-                <div className="border rounded-md h-32 overflow-y-auto p-2 space-y-1 bg-white">
-                  {Object.keys(dataset[0]).map(k => (
-                    <label key={k} className={`flex items-center gap-2 text-sm p-1 rounded ${projectSetupLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-50'}`}>
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-gray-300"
-                        checked={protectedColumns.includes(k)}
-                        disabled={projectSetupLocked}
-                        onChange={() => {
-                          if (protectedColumns.includes(k)) {
-                            setProtectedColumns(protectedColumns.filter(c => c !== k));
-                          } else {
-                            setProtectedColumns([...protectedColumns, k]);
-                          }
-                        }}
-                      />
-                      {k}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -530,7 +706,7 @@ export function ProjectSetup() {
         <div className="relative group">
           <Button size="lg" className="w-full sm:w-auto" onClick={runUnifiedAudit} disabled={!dataset || !targetColumn || protectedColumns.length === 0 || auditLoading}>
             <BrainCircuit className="w-5 h-5 mr-2" />
-            {auditLoading ? 'Running Comprehensive Audit...' : 'Run Unified Setup Audit'}
+            {auditLoading ? 'Running Comprehensive Audit...' : 'Run Unified Data Audit'}
           </Button>
           {(!dataset || !targetColumn || protectedColumns.length === 0) && (
             <div className="absolute -top-12 right-0 hidden group-hover:block z-50">
