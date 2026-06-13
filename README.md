@@ -26,10 +26,12 @@ The current prototype is strongest for pre-deployment audits of CSV and Excel da
 - Governance questionnaire and memo
 - Final decision synthesis
 - Dataset-aware audit chat
+- Model-audit intake flow for `PKL`, `JOBLIB`, `PT`, `ONNX`, `H5`, and `GGUF`
+- Executable backend model auditing for scikit-learn `PKL` and `JOBLIB` files
 
 ### In Development
 
-- Model-file auditing for `PKL`, `PT`, `ONNX`, `H5`, and `GGUF`
+- Executable model support for `PT`, `ONNX`, `H5`, and `GGUF`
 - Direct cloud model auditing
 - Richer export formats beyond JSON
 - Authentication, persistence, and multi-user audit history
