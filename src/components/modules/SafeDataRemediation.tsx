@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import axios from 'axios';
-import { ShieldCheck, Sparkles, ArrowRightLeft, TriangleAlert, Download, Eye, Wand2 } from 'lucide-react';
+import { ShieldCheck, Sparkles, ArrowRightLeft, TriangleAlert, Download, Eye, Wand2, FileStack } from 'lucide-react';
 import { useAudit } from '../../context/AuditContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -43,6 +43,11 @@ export function SafeDataRemediation() {
     setRemediationResult,
     addLlmMessage,
     llmMessages,
+    setActiveModule,
+    saveCurrentVersion,
+    currentAuditRunId,
+    findVersionEntryByAuditRunId,
+    setSelectedVersionId,
   } = useAudit();
 
   const [selectedTechniqueId, setSelectedTechniqueId] = useState('');
@@ -231,6 +236,29 @@ export function SafeDataRemediation() {
     anchor.download = `BiasScope_${selectedTechniqueId || 'safe_transform'}_summary.json`;
     anchor.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleMoveToVersioning = () => {
+    const existingVersion = currentAuditRunId ? findVersionEntryByAuditRunId(currentAuditRunId) : null;
+    if (existingVersion) {
+      const shouldCreateAnother = window.confirm(
+        'This audit run already has an entry in Versioning. Do you want to create another versioning instance for the same document?'
+      );
+      if (!shouldCreateAnother) {
+        setSelectedVersionId(existingVersion.id);
+        setActiveModule('versioning');
+        toast.message('Opened the existing versioning entry for this audit run.');
+        return;
+      }
+    }
+
+    const created = saveCurrentVersion();
+    if (!created) {
+      toast.error('Create the final decision first so BiasScope can save a versioned snapshot.');
+      return;
+    }
+    setActiveModule('versioning');
+    toast.success('Version snapshot saved.', { description: 'The whole audit run is now stored in Versioning for before/after comparison.' });
   };
 
   const canPreview =
@@ -611,6 +639,17 @@ export function SafeDataRemediation() {
                   <Button variant="outline" onClick={exportTransformationSummary}>
                     <Download className="w-4 h-4 mr-2" />
                     Export Transformation Summary
+                  </Button>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-[#141414]/15 bg-white p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-900">Move This Run To Versioning</h4>
+                    <p className="text-sm text-gray-700">Save the full audit pipeline state so you can compare this original run against future versions.</p>
+                  </div>
+                  <Button variant="outline" onClick={handleMoveToVersioning}>
+                    <FileStack className="w-4 h-4 mr-2" />
+                    Move To Versioning
                   </Button>
                 </div>
               </CardContent>

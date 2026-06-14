@@ -78,6 +78,7 @@ type AuditContextType = {
   deleteVersionEntry: (id: string) => void;
   renameAuditRunEntry: (id: string, nextTitle: string) => void;
   deleteAuditRunEntry: (id: string) => void;
+  updateVersionEntry: (id: string, updates: Partial<VersionEntry>) => void;
 };
 
 const AuditContext = createContext<AuditContextType | undefined>(undefined);
@@ -305,6 +306,17 @@ export const AuditProvider = ({ children, userEmail }: { children: ReactNode; us
     void writeVersionEntries(userEmail, nextEntries);
   };
 
+  const updateVersionEntry = (id: string, updates: Partial<VersionEntry>) => {
+    if (!userEmail) {
+      return;
+    }
+    const nextEntries = versionEntries.map((entry) =>
+      entry.id === id ? { ...entry, ...updates } : entry
+    );
+    setVersionEntries(nextEntries);
+    void writeVersionEntries(userEmail, nextEntries);
+  };
+
   const renameAuditRunEntry = (id: string, nextTitle: string) => {
     if (!userEmail) {
       return;
@@ -371,6 +383,7 @@ export const AuditProvider = ({ children, userEmail }: { children: ReactNode; us
       saveSnapshotToVersioning,
       renameVersionEntry,
       deleteVersionEntry,
+      updateVersionEntry,
       renameAuditRunEntry,
       deleteAuditRunEntry
     }}>

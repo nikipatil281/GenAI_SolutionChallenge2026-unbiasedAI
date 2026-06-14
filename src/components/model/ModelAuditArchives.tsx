@@ -313,12 +313,17 @@ export function ModelSnapshotStageView({
 
 function EmptyAfterPane() {
   return (
-    <Card className="h-full border-dashed">
-      <CardContent className="flex h-full min-h-[540px] flex-col items-center justify-center text-center text-[#141414]/55">
-        <GitCompareArrows className="mb-4 h-12 w-12 opacity-20" />
-        <p className="font-semibold text-[#141414]/70">No after-version yet.</p>
-        <p className="mt-2 max-w-sm text-sm">
-          This side stays open for the next saved version of the same model audit so users can compare before and after.
+    <Card className="h-full border-dashed bg-[#141414]/[0.02]">
+      <CardContent className="flex h-full min-h-[540px] flex-col items-center justify-center text-center text-[#141414]/60 p-8">
+        <div className="rounded-full bg-blue-100 p-4 mb-4">
+          <GitCompareArrows className="h-10 w-10 text-blue-600 opacity-80" />
+        </div>
+        <h3 className="font-bold text-xl text-[#141414] mb-2">🚧 Under Construction 🚧</h3>
+        <p className="max-w-md text-sm leading-relaxed">
+          The "Upload After Model" feature is currently brewing in our development labs. 
+        </p>
+        <p className="mt-3 max-w-md text-sm leading-relaxed">
+          Rest assured, it will work exactly like the Dataset Audit versioning—just with slightly more math and 100% fewer data science tears. Check back soon!
         </p>
       </CardContent>
     </Card>

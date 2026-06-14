@@ -3,14 +3,14 @@ import { useAudit } from '../../context/AuditContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { BrainCircuit, AlertOctagon, CheckCircle2, AlertTriangle, FileJson, Info, Wand2, FileStack } from 'lucide-react';
+import { BrainCircuit, AlertOctagon, CheckCircle2, AlertTriangle, FileJson, Info, Wand2 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 import { apiUrl } from '../../lib/api';
 
 export function DecisionExport() {
-  const { problemFraming, datasetStats, fairnessMetrics, subgroups, governance, systemDecision, setSystemDecision, llmMessages, setActiveModule, remediationResult, saveCurrentVersion, buildCurrentSnapshot, saveSnapshotAsAuditRun, currentAuditRunId, findVersionEntryByAuditRunId, setSelectedVersionId } = useAudit();
+  const { problemFraming, datasetStats, fairnessMetrics, subgroups, governance, systemDecision, setSystemDecision, llmMessages, setActiveModule, remediationResult, buildCurrentSnapshot, saveSnapshotAsAuditRun } = useAudit();
   const [loading, setLoading] = useState(false);
   const completedMemoTypes = new Set(llmMessages.map((message) => message.type));
   const decisionReadiness = [
@@ -61,29 +61,6 @@ export function DecisionExport() {
     a.download = 'BiasScope_Audit_Report.json';
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  const handleMoveToVersioning = () => {
-    const existingVersion = currentAuditRunId ? findVersionEntryByAuditRunId(currentAuditRunId) : null;
-    if (existingVersion) {
-      const shouldCreateAnother = window.confirm(
-        'This audit run already has an entry in Versioning. Do you want to create another versioning instance for the same document?'
-      );
-      if (!shouldCreateAnother) {
-        setSelectedVersionId(existingVersion.id);
-        setActiveModule('versioning');
-        toast.message('Opened the existing versioning entry for this audit run.');
-        return;
-      }
-    }
-
-    const created = saveCurrentVersion();
-    if (!created) {
-      toast.error('Create the final decision first so BiasScope can save a versioned snapshot.');
-      return;
-    }
-    setActiveModule('versioning');
-    toast.success('Version snapshot saved.', { description: 'The whole audit run is now stored in Versioning for before/after comparison.' });
   };
 
   return (
@@ -175,17 +152,6 @@ export function DecisionExport() {
               <Button variant="outline" onClick={() => setActiveModule('safe-remediation')}>
                 <Wand2 className="w-4 h-4 mr-2" />
                 Open Safe Data Actions
-              </Button>
-            </div>
-
-            <div className="rounded-xl border border-[#141414]/15 bg-white p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h4 className="font-semibold text-gray-900">Move This Run To Versioning</h4>
-                <p className="text-sm text-gray-700">Save the full audit pipeline state so you can compare this original run against future versions.</p>
-              </div>
-              <Button variant="outline" onClick={handleMoveToVersioning}>
-                <FileStack className="w-4 h-4 mr-2" />
-                Move To Versioning
               </Button>
             </div>
           </CardContent>

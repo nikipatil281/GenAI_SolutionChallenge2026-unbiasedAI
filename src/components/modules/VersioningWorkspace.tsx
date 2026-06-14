@@ -1,11 +1,15 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { Clock3, GitCompareArrows, FileStack, AlertTriangle } from 'lucide-react';
+import { Clock3, GitCompareArrows, FileStack, AlertTriangle, Upload } from 'lucide-react';
 import { useAudit } from '../../context/AuditContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Tabs, TabsList, TabsTrigger } from '../ui/tabs';
 import type { AuditSnapshot, VersionEntry } from '../../lib/versioning';
 import { Button } from '../ui/button';
+import Papa from 'papaparse';
+import axios from 'axios';
+import { apiUrl } from '../../lib/api';
+import { toast } from 'sonner';
 
 export const VERSION_STAGES = [
   { id: 'project-setup', label: '01 Project Setup' },
@@ -61,9 +65,9 @@ function ProjectSetupView({ snapshot }: { snapshot: AuditSnapshot }) {
           <CardDescription>Saved when this audit run was moved into versioning.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 text-sm">
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-widest opacity-50">Dataset</p>
-            <p className="mt-1 font-semibold">{snapshot.datasetLabel}</p>
+            <p className="mt-1 font-semibold truncate" title={snapshot.datasetLabel}>{snapshot.datasetLabel}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-widest opacity-50">Rows</p>
@@ -307,7 +311,114 @@ export function SnapshotStageView({
   return <DecisionView snapshot={snapshot} decisionAction={decisionAction} />;
 }
 
-function EmptyAfterPane() {
+function EmptyAfterPane({ entry }: { entry: VersionEntry }) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { updateVersionEntry } = useAudit();
+  const [isAnalyzing, setIsAnalyzing] = React.useState(false);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsAnalyzing(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const data = results.data;
+        if (data.length === 0) {
+          toast.error('The uploaded CSV is empty.');
+          setIsAnalyzing(false);
+          return;
+        }
+
+        const originalColumns = entry.beforeSnapshot.datasetStats?.columns || [];
+        const newColumns = Object.keys(data[0] as any);
+
+        const matchedColumns = newColumns.filter(col => originalColumns.includes(col));
+        const matchRatio = matchedColumns.length / Math.max(originalColumns.length, newColumns.length || 1);
+
+        if (originalColumns.length > 0 && matchRatio < 0.5) {
+          toast.error('The uploaded CSV seems entirely different from the original dataset. Please upload a related dataset.');
+          setIsAnalyzing(false);
+          return;
+        }
+
+        try {
+          const response = await axios.post(apiUrl('/api/audit/analyze'), {
+            data,
+            targetColumn: entry.beforeSnapshot.targetColumn,
+            protectedColumns: entry.beforeSnapshot.protectedColumns,
+            groundTruthColumn: entry.beforeSnapshot.groundTruthColumn === 'none' ? undefined : entry.beforeSnapshot.groundTruthColumn
+          });
+
+          const { datasetStats, associations, fairness, subgroups } = response.data;
+
+          const decisionContext = {
+            problemFraming: entry.beforeSnapshot.problemFraming,
+            datasetStatsSummary: datasetStats ? "Dataset loaded" : "No data",
+            fairnessMetricsSummary: fairness,
+            subgroupRisks: subgroups ? Object.keys(subgroups).length + " subgroups analyzed" : "None",
+            governance: entry.beforeSnapshot.governance,
+            llmFindings: entry.beforeSnapshot.llmMessages.map(m => m.title)
+          };
+
+          const [projectSetupRes, proxyRes, fairnessRes, decisionRes] = await Promise.all([
+            axios.post(apiUrl('/api/llm/project-setup'), {
+              questionnaire: {
+                problemFraming: entry.beforeSnapshot.problemFraming,
+                targetColumn: entry.beforeSnapshot.targetColumn,
+                protectedColumns: entry.beforeSnapshot.protectedColumns
+              },
+              datasetStats
+            }),
+            associations ? axios.post(apiUrl('/api/llm/proxy'), { associations: associations.slice(0, 10) }) : Promise.resolve(null),
+            fairness ? axios.post(apiUrl('/api/llm/fairness'), { fairnessMetrics: fairness, subgroups }) : Promise.resolve(null),
+            axios.post(apiUrl('/api/llm/decision'), { context: decisionContext })
+          ]);
+
+          const newLlmMessages = entry.beforeSnapshot.llmMessages.map(msg => {
+            if (msg.type === 'project-setup' && projectSetupRes) {
+              return { ...msg, content: projectSetupRes.data.memo };
+            }
+            if (msg.type === 'proxy' && proxyRes) {
+              return { ...msg, content: proxyRes.data.evaluation };
+            }
+            if (msg.type === 'subgroup' && fairnessRes) {
+              return { ...msg, content: fairnessRes.data.summary };
+            }
+            return msg;
+          });
+
+          const afterSnapshot: AuditSnapshot = {
+            ...entry.beforeSnapshot,
+            datasetLabel: file.name,
+            datasetStats: {
+              ...datasetStats,
+              totalRows: data.length,
+            },
+            associations,
+            fairnessMetrics: fairness,
+            subgroups,
+            llmMessages: newLlmMessages,
+            systemDecision: decisionRes.data,
+          };
+
+          updateVersionEntry(entry.id, { afterSnapshot });
+          toast.success('After CSV uploaded and analyzed successfully. You can now compare the versions.');
+        } catch (error: any) {
+          toast.error('Failed to analyze the new dataset.', { description: error.response?.data?.error || error.message });
+        } finally {
+          setIsAnalyzing(false);
+        }
+      },
+      error: (error: any) => {
+        toast.error('Failed to parse CSV.', { description: error.message });
+        setIsAnalyzing(false);
+      }
+    });
+  };
+
   return (
     <Card className="h-full border-dashed">
       <CardContent className="flex h-full min-h-[540px] flex-col items-center justify-center text-center text-[#141414]/55">
@@ -316,6 +427,19 @@ function EmptyAfterPane() {
         <p className="mt-2 max-w-sm text-sm">
           This side is reserved for the next saved version so users can compare the original audit run against a later, improved one.
         </p>
+        <div className="mt-6">
+          <input
+            type="file"
+            accept=".csv"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing}>
+            <Upload className="w-4 h-4 mr-2" />
+            {isAnalyzing ? 'Analyzing...' : 'Upload After CSV'}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -390,7 +514,7 @@ export function VersioningWorkspace() {
           {selectedEntry.afterSnapshot ? (
             <SnapshotStageView snapshot={selectedEntry.afterSnapshot} stage={activeVersionStage} />
           ) : (
-            <EmptyAfterPane />
+            <EmptyAfterPane entry={selectedEntry} />
           )}
         </div>
       </div>
