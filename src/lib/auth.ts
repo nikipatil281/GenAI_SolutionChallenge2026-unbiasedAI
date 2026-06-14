@@ -1,46 +1,87 @@
-import { readJsonValue, removeValue, writeJsonValue } from './persistence';
+import { signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider } from 'firebase/auth';
+import { auth, googleProvider } from './firebase';
 
 export type AuthMode = 'login' | 'signup';
-export type AuthProvider = 'password' | 'google';
+export type AuthProvider = 'password' | 'google' | 'yahoo';
 
 export interface AuthSession {
   email: string;
   provider: AuthProvider;
   createdAt: string;
+  uid: string;
 }
 
-export const AUTH_SESSION_KEY = 'biasscope.auth.session';
+export function readAuthSession(): Promise<AuthSession | null> {
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
+      unsubscribe();
+      if (user && user.email) {
+        resolve({
+          email: user.email,
+          provider: 'google', // Just defaulting to google for legacy sessions, though not strictly accurate it's fine for UI
+          createdAt: user.metadata.creationTime || new Date().toISOString(),
+          uid: user.uid
+        });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
 
-export async function readAuthSession(): Promise<AuthSession | null> {
-  const parsedSession = await readJsonValue<Partial<AuthSession>>(AUTH_SESSION_KEY);
-  if (
-    !parsedSession ||
-    typeof parsedSession.email !== 'string' ||
-    typeof parsedSession.provider !== 'string' ||
-    typeof parsedSession.createdAt !== 'string'
-  ) {
-    return null;
-  }
-
+export async function signInWithEmail(email: string, pass: string): Promise<AuthSession> {
+  const result = await signInWithEmailAndPassword(auth, email, pass);
+  if (!result.user.email) throw new Error("No email returned.");
   return {
-    email: parsedSession.email,
-    provider: parsedSession.provider,
-    createdAt: parsedSession.createdAt,
+    email: result.user.email,
+    provider: 'password',
+    createdAt: result.user.metadata.creationTime || new Date().toISOString(),
+    uid: result.user.uid
   };
 }
 
-export async function writeAuthSession(session: AuthSession) {
-  await writeJsonValue(AUTH_SESSION_KEY, session);
+export async function signUpWithEmail(email: string, pass: string): Promise<AuthSession> {
+  const result = await createUserWithEmailAndPassword(auth, email, pass);
+  if (!result.user.email) throw new Error("No email returned.");
+  return {
+    email: result.user.email,
+    provider: 'password',
+    createdAt: result.user.metadata.creationTime || new Date().toISOString(),
+    uid: result.user.uid
+  };
+}
+
+export async function signInWithGoogle(): Promise<AuthSession> {
+  const result = await signInWithPopup(auth, googleProvider);
+  const user = result.user;
+  if (!user.email) throw new Error("No email returned from Google auth.");
+  return {
+    email: user.email,
+    provider: 'google',
+    createdAt: user.metadata.creationTime || new Date().toISOString(),
+    uid: user.uid
+  };
+}
+
+export async function signInWithYahoo(): Promise<AuthSession> {
+  const yahooProvider = new OAuthProvider('yahoo.com');
+  const result = await signInWithPopup(auth, yahooProvider);
+  const user = result.user;
+  if (!user.email) throw new Error("No email returned from Yahoo auth.");
+  return {
+    email: user.email,
+    provider: 'yahoo',
+    createdAt: user.metadata.creationTime || new Date().toISOString(),
+    uid: user.uid
+  };
 }
 
 export async function clearAuthSession() {
-  await removeValue(AUTH_SESSION_KEY);
+  await signOut(auth);
 }
 
-export function createPasswordSession(email: string): AuthSession {
-  return {
-    email,
-    provider: 'password',
-    createdAt: new Date().toISOString(),
-  };
+export async function getIdToken(): Promise<string | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  return await user.getIdToken();
 }

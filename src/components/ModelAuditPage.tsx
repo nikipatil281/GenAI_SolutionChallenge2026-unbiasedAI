@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
-import { ArrowLeft, Upload, ShieldCheck, FileCode2, Database, Sparkles, Info, Trash2, Plus, AlertTriangle, Lock, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Upload, ShieldCheck, FileCode2, Database, Sparkles, Info, Trash2, Plus, AlertTriangle, Lock, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -13,6 +13,76 @@ import { Badge } from './ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from './ui/hover-card';
 import { apiUrl } from '../lib/api';
 import { toast } from 'sonner';
+import { SAMPLE_MODELS, getSampleModelById } from '../lib/sampleDatasets';
+
+const MetricBadge = ({ label, value, tooltip }: { label: string, value: any, tooltip: string }) => (
+  <HoverCard>
+    <HoverCardTrigger className="cursor-help inline-block border-none bg-transparent p-0 m-0">
+      <Badge variant="outline" className="flex items-center gap-1">
+        <span>{label} {value}</span>
+        <Info className="h-3 w-3 text-[#141414]/50" />
+      </Badge>
+    </HoverCardTrigger>
+    <HoverCardContent className="w-64 text-xs font-sans text-left z-50 normal-case tracking-normal">
+      <p className="font-bold text-sm mb-1">{label}</p>
+      <p className="text-muted-foreground">{tooltip}</p>
+    </HoverCardContent>
+  </HoverCard>
+);
+
+const FairnessColumnCard = ({ column, metrics }: { column: string, metrics: any }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div className="rounded-2xl border border-[#141414]/10 bg-white overflow-hidden">
+      <div 
+        className="flex flex-wrap items-center justify-between gap-3 p-4 cursor-pointer select-none hover:bg-gray-50 transition-colors"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div>
+          <p className="text-[10px] uppercase tracking-widest opacity-50">Protected Column</p>
+          <p className="mt-1 text-lg font-bold">{column}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <MetricBadge label="DP Diff" value={formatMetric(metrics.demographicParityDifference)} tooltip="Demographic Parity Difference: The difference in positive prediction rates between groups. Ideal is 0." />
+          <MetricBadge label="DP Ratio" value={formatMetric(metrics.demographicParityRatio)} tooltip="Demographic Parity Ratio: The ratio of positive prediction rates between groups. Ideal is 1." />
+          {metrics.equalOpportunityDifference !== undefined && (
+            <MetricBadge label="EO Diff" value={formatMetric(metrics.equalOpportunityDifference)} tooltip="Equal Opportunity Difference: Difference in True Positive Rates (TPR) between groups. Ideal is 0." />
+          )}
+          {metrics.averageOddsDifference !== undefined && (
+            <MetricBadge label="Avg Odds" value={formatMetric(metrics.averageOddsDifference)} tooltip="Average Odds Difference: Average of difference in TPR and FPR between groups. Ideal is 0." />
+          )}
+          {metrics.errorRateDifference !== undefined && (
+            <MetricBadge label="Err Diff" value={formatMetric(metrics.errorRateDifference)} tooltip="Error Rate Difference: Difference in overall error rates between groups. Ideal is 0." />
+          )}
+          <div className="ml-2 text-gray-400">
+            {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </div>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="p-4 pt-0 border-t border-[#141414]/5 bg-gray-50/50">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            {Object.entries(metrics.groupMetrics || {}).map(([group, values]: [string, any]) => (
+              <div key={group} className="rounded-xl border border-[#141414]/10 bg-white p-3 text-sm shadow-sm">
+                <p className="font-semibold">{group}</p>
+                <div className="mt-2 space-y-1">
+                  <p className="text-[#141414]/70 flex justify-between"><span>Rows:</span> <span>{values.count}</span></p>
+                  <p className="text-[#141414]/70 flex justify-between"><span>Positive rate:</span> <span>{formatMetric(values.positiveRate)}</span></p>
+                  {values.tpr !== undefined && <p className="text-[#141414]/70 flex justify-between"><span>TPR:</span> <span>{formatMetric(values.tpr)}</span></p>}
+                  {values.fpr !== undefined && <p className="text-[#141414]/70 flex justify-between"><span>FPR:</span> <span>{formatMetric(values.fpr)}</span></p>}
+                  {values.errorRate !== undefined && <p className="text-[#141414]/70 flex justify-between"><span>Error rate:</span> <span>{formatMetric(values.errorRate)}</span></p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+import { Label } from './ui/label';
 import { LlmCompanion } from './ui/llm-companion';
 import { ModelAuditSidebar } from './ModelAuditSidebar';
 import { ModelAuditChat } from './model/ModelAuditChat';
@@ -153,6 +223,7 @@ function parseDatasetFile(file: File): Promise<DatasetSummary> {
             rowCount: rows.length,
             columnCount: columns.length,
             columns,
+            sampleData: rows.slice(0, 3),
           });
         },
         error: (error) => reject(error),
@@ -174,6 +245,7 @@ function parseDatasetFile(file: File): Promise<DatasetSummary> {
             rowCount: rows.length,
             columnCount: columns.length,
             columns,
+            sampleData: rows.slice(0, 3),
           });
         } catch (error) {
           reject(error);
@@ -228,6 +300,7 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
   const [memoLoading, setMemoLoading] = useState(false);
   const [selectedGroundTruthColumn, setSelectedGroundTruthColumn] = useState('');
   const [selectedProtectedColumns, setSelectedProtectedColumns] = useState<string[]>([]);
+  const [aiSuggestedColumns, setAiSuggestedColumns] = useState<string[]>([]);
   const [executionLoading, setExecutionLoading] = useState(false);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
   const [auditRunEntries, setAuditRunEntries] = useState<ModelAuditRunEntry[]>([]);
@@ -236,6 +309,10 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
   const [selectedVersionId, setSelectedVersionId] = useState('');
   const [currentAuditRunId, setCurrentAuditRunId] = useState('');
   const [activeArchiveStage, setActiveArchiveStage] = useState<ModelAuditStageId>('model-intake');
+
+  const [dataSourceMode, setDataSourceMode] = useState<'upload' | 'sample'>('upload');
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const [selectedSampleId, setSelectedSampleId] = useState('');
 
   const modelTypeInfo = MODEL_TYPE_OPTIONS.find((option) => option.value === modelType) || MODEL_TYPE_OPTIONS.at(-1)!;
   const dependentColumns = trainingColumns.filter((column) => column.role === 'dependent');
@@ -301,7 +378,7 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
     !datasetFile ? 'Upload the evaluation dataset file that should be run through the model.' : null,
     dependentDatasetColumns.length === 0 ? 'At least one dependent column must also be present in the uploaded dataset.' : null,
     !selectedGroundTruthColumn ? 'Choose the ground truth column that represents the real outcome.' : null,
-    selectedProtectedColumns.length === 0 ? 'Choose at least one protected column for the fairness comparison.' : null,
+    selectedProtectedColumns.filter(c => datasetColumnOptions.includes(c) && c !== selectedGroundTruthColumn).length === 0 ? 'Choose at least one protected column for the fairness comparison.' : null,
   ].filter(Boolean) as string[];
   const canRunExecution = Boolean(modelFile) && Boolean(datasetFile) && executionBlockers.length === 0;
   const stageIds = useMemo(() => new Set(MODEL_AUDIT_STAGES.map((stage) => stage.id)), []);
@@ -462,11 +539,8 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
     });
   }, [dependentDatasetColumns]);
 
-  useEffect(() => {
-    setSelectedProtectedColumns((current) =>
-      current.filter((column) => datasetColumnOptions.includes(column) && column !== selectedGroundTruthColumn)
-    );
-  }, [datasetColumnOptions, selectedGroundTruthColumn]);
+  // Removed the aggressive useEffect that synced selectedProtectedColumns 
+  // because it was causing race conditions where LLM-detected columns were wiped out.
 
   useEffect(() => {
     let cancelled = false;
@@ -579,10 +653,81 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
       setDatasetSummary(summary);
       mergeImportedColumns(summary.columns);
       toast.success(`Parsed ${summary.fileName} locally and imported ${summary.columnCount} column names.`);
+
+      if (summary.sampleData && summary.sampleData.length > 0) {
+        try {
+          const res = await axios.post(apiUrl('/api/llm/detect-protected'), { 
+            columns: summary.columns, 
+            sampleData: summary.sampleData 
+          });
+          if (res.data.protectedCols && res.data.protectedCols.length > 0) {
+            const matchedCols = res.data.protectedCols.map((col: string) => {
+              const exactMatch = summary.columns.find((c) => c.toLowerCase() === col.toLowerCase());
+              return exactMatch || col;
+            });
+            setSelectedProtectedColumns(matchedCols);
+            setAiSuggestedColumns(matchedCols);
+            toast.success(`Auto-detected protected attributes: ${matchedCols.join(', ')}`);
+          } else {
+            toast.info('Could not auto-detect protected attribute. Please select manually.');
+          }
+        } catch (err) {
+          console.error("Auto-detect failed", err);
+        }
+      }
     } catch (error: any) {
       toast.error('Could not parse dataset file.', { description: error.message });
     } finally {
       setDatasetUploadLoading(false);
+    }
+  };
+
+  const handleSampleModelSelection = async (sampleId: string) => {
+    setDataSourceMode('sample');
+    setSelectedSampleId(sampleId);
+    const sampleDef = getSampleModelById(sampleId);
+    if (!sampleDef) {
+      toast.error('Could not find that sample model.');
+      return;
+    }
+
+    setSampleLoading(true);
+
+    try {
+      const modelRes = await fetch(sampleDef.modelUrl);
+      const modelBlob = await modelRes.blob();
+      const modelF = new File([modelBlob], sampleDef.modelFileName, { type: modelBlob.type });
+      
+      const dataRes = await fetch(sampleDef.datasetUrl);
+      const dataBlob = await dataRes.blob();
+      const dataF = new File([dataBlob], sampleDef.datasetFileName, { type: dataBlob.type });
+      
+      setModelFile(modelF);
+      setModelType(sampleDef.modelType as ModelType);
+      setModelPurpose(sampleDef.modelPurpose);
+      
+      setDatasetFile(dataF);
+      setDataAccessMode('full-dataset');
+      
+      const summary = await parseDatasetFile(dataF);
+      setDatasetSummary(summary);
+      
+      setTrainingColumns(sampleDef.trainingColumns.map((col, idx) => ({
+        id: `sample-${Date.now()}-${idx}`,
+        name: col.name,
+        role: col.role as ColumnRole,
+        description: col.description || ''
+      })));
+      
+      setSelectedGroundTruthColumn(sampleDef.groundTruthColumn);
+      setSelectedProtectedColumns(sampleDef.protectedColumns);
+      setAiSuggestedColumns(sampleDef.protectedColumns);
+      
+      toast.success(`Loaded sample model and dataset: ${sampleDef.name}`);
+    } catch (err: any) {
+      toast.error('Failed to load sample model.', { description: err.message });
+    } finally {
+      setSampleLoading(false);
     }
   };
 
@@ -651,7 +796,7 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
         modelPurpose,
         trainingColumns,
         groundTruthColumn: selectedGroundTruthColumn,
-        protectedColumns: selectedProtectedColumns,
+        protectedColumns: selectedProtectedColumns.filter(c => datasetColumnOptions.includes(c) && c !== selectedGroundTruthColumn),
         modelFile: {
           name: modelFile.name,
           contentBase64: modelContentBase64,
@@ -821,7 +966,12 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                     </CardHeader>
                     <CardContent className="space-y-5">
                       <div className="flex flex-wrap items-center gap-4">
-                        <Button className="relative cursor-pointer">
+                        <Button 
+                          variant={dataSourceMode === 'upload' ? 'default' : 'outline'}
+                          className="relative cursor-pointer"
+                          onClick={() => setDataSourceMode('upload')}
+                          disabled={sampleLoading}
+                        >
                           <Upload className="w-4 h-4 mr-2" />
                           Upload Model File
                           <input
@@ -829,7 +979,17 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                             className="absolute inset-0 cursor-pointer opacity-0"
                             accept=".pkl,.joblib,.onnx,.h5,.keras,.pt,.pth,.gguf"
                             onChange={handleModelUpload}
+                            disabled={sampleLoading}
                           />
+                        </Button>
+                        <Button
+                          variant={dataSourceMode === 'sample' ? 'default' : 'secondary'}
+                          type="button"
+                          onClick={() => setDataSourceMode('sample')}
+                          disabled={sampleLoading}
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          {sampleLoading ? 'Loading Sample...' : 'Try Sample Data'}
                         </Button>
                         {modelFile && (
                           <Badge variant="secondary" className="px-3 py-1 text-sm">
@@ -838,6 +998,29 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                           </Badge>
                         )}
                       </div>
+
+                      {dataSourceMode === 'sample' && (
+                        <div className="space-y-2">
+                          <Label>Sample Model & Dataset</Label>
+                          <Select value={selectedSampleId} onValueChange={handleSampleModelSelection} disabled={sampleLoading}>
+                            <SelectTrigger className="w-full" disabled={sampleLoading}>
+                              <SelectValue placeholder="Choose a sample to auto-fill the validation setup" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {SAMPLE_MODELS.map((sample) => (
+                                <SelectItem key={sample.id} value={sample.id}>
+                                  {sample.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {selectedSampleId && (
+                            <p className="text-xs text-[#141414]/60 mt-2">
+                              {getSampleModelById(selectedSampleId)?.description}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Model format</label>
@@ -1221,7 +1404,9 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                                         onClick={() => toggleProtectedColumn(column)}
                                         className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                                           selected
-                                            ? 'border-[#F27D26] bg-[#F27D26]/10 text-[#141414]'
+                                            ? aiSuggestedColumns.includes(column)
+                                              ? 'border-[#F27D26] bg-[#F27D26]/10 text-[#141414]'
+                                              : 'border-blue-500 bg-blue-500/10 text-[#141414]'
                                             : 'border-[#141414]/15 bg-white text-[#141414]/65 hover:border-[#141414]'
                                         }`}
                                       >
@@ -1231,8 +1416,19 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                                   })
                               )}
                             </div>
-                            <p className="text-xs text-[#141414]/60">
-                              Choose the demographic columns you want the fairness comparison to use, such as `sex`, `race`, or `age_band`.
+                            <p className="text-xs text-[#141414]/60 mt-1">
+                              {selectedProtectedColumns.length > 0 ? (
+                                <span className="flex flex-col gap-1 mt-2">
+                                  {selectedProtectedColumns.some(c => aiSuggestedColumns.includes(c)) && (
+                                    <span><span className="text-[#F27D26] font-medium">✨ AI Suggestion:</span> These columns were highlighted because they are standard demographic attributes that may introduce bias.</span>
+                                  )}
+                                  {selectedProtectedColumns.some(c => !aiSuggestedColumns.includes(c)) && (
+                                    <span><span className="text-blue-500 font-medium">👤 User Selected:</span> You have manually selected additional columns for fairness auditing.</span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span>Choose the demographic columns you want the fairness comparison to use, such as `sex`, `race`, or `age_band`.</span>
+                              )}
                             </p>
                           </div>
                         </div>
@@ -1302,40 +1498,7 @@ export function ModelAuditPage({ onBack, userEmail }: ModelAuditPageProps) {
                           )}
 
                           {executionResult.fairness && Object.entries(executionResult.fairness).map(([column, metrics]: [string, any]) => (
-                            <div key={column} className="rounded-2xl border border-[#141414]/10 bg-white p-4 space-y-4">
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-[10px] uppercase tracking-widest opacity-50">Protected Column</p>
-                                  <p className="mt-1 text-lg font-bold">{column}</p>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <Badge variant="outline">DP Diff {formatMetric(metrics.demographicParityDifference)}</Badge>
-                                  <Badge variant="outline">DP Ratio {formatMetric(metrics.demographicParityRatio)}</Badge>
-                                  {metrics.equalOpportunityDifference !== undefined && (
-                                    <Badge variant="outline">EO Diff {formatMetric(metrics.equalOpportunityDifference)}</Badge>
-                                  )}
-                                  {metrics.averageOddsDifference !== undefined && (
-                                    <Badge variant="outline">Avg Odds {formatMetric(metrics.averageOddsDifference)}</Badge>
-                                  )}
-                                  {metrics.errorRateDifference !== undefined && (
-                                    <Badge variant="outline">Err Diff {formatMetric(metrics.errorRateDifference)}</Badge>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {Object.entries(metrics.groupMetrics || {}).map(([group, values]: [string, any]) => (
-                                  <div key={group} className="rounded-xl border border-[#141414]/10 bg-[#141414]/[0.03] p-3 text-sm">
-                                    <p className="font-semibold">{group}</p>
-                                    <p className="mt-1 text-[#141414]/70">Rows: {values.count}</p>
-                                    <p className="text-[#141414]/70">Positive rate: {formatMetric(values.positiveRate)}</p>
-                                    {values.tpr !== undefined && <p className="text-[#141414]/70">TPR: {formatMetric(values.tpr)}</p>}
-                                    {values.fpr !== undefined && <p className="text-[#141414]/70">FPR: {formatMetric(values.fpr)}</p>}
-                                    {values.errorRate !== undefined && <p className="text-[#141414]/70">Error rate: {formatMetric(values.errorRate)}</p>}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
+                            <FairnessColumnCard key={column} column={column} metrics={metrics} />
                           ))}
 
                           {executionResult.previewRows.length > 0 && (

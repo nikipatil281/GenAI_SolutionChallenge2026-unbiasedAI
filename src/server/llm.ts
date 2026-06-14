@@ -15,36 +15,32 @@ type PromptRunOptions = {
   useKnowledgeBase?: boolean;
 };
 
-function getAI() {
-  if (!generativeModel) {
-    const project = process.env.GCP_PROJECT_ID;
+let vertexAIInstance: VertexAI | null = null;
+const FALLBACK_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-2.5-pro',
+  'gemini-3.0-flash',
+  'gemini-3.1-pro'
+];
+
+function getVertexAI() {
+  if (!vertexAIInstance) {
+    const project = process.env.GCP_PROJECT_ID || 'genai-solution-challenge';
     const location = process.env.GCP_LOCATION || 'us-central1';
-    const client_email = process.env.GCP_CLIENT_EMAIL;
-    const private_key = process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (project && client_email && private_key) {
-      try {
-        const vertexAI = new VertexAI({ 
-          project, 
-          location,
-          googleAuthOptions: {
-            credentials: {
-              client_email,
-              private_key
-            }
-          }
-        });
-        generativeModel = vertexAI.getGenerativeModel({
-          model: 'gemini-2.5-pro',
-        });
-      } catch (e) {
-        console.error("Failed to initialize Vertex AI client:", e);
-      }
-    } else {
-        console.warn("GCP_PROJECT_ID, GCP_CLIENT_EMAIL, or GCP_PRIVATE_KEY is missing. Vertex AI client cannot be initialized.");
-    }
+    vertexAIInstance = new VertexAI({ project, location });
   }
-  return generativeModel;
+  return vertexAIInstance;
+}
+
+function getAI(modelIndex = 0) {
+  try {
+    const vertexAI = getVertexAI();
+    const modelName = FALLBACK_MODELS[modelIndex] || FALLBACK_MODELS[0];
+    return vertexAI.getGenerativeModel({ model: modelName });
+  } catch (e) {
+    console.error("Failed to initialize Vertex AI client:", e);
+    return null;
+  }
 }
 
 function sanitizeTextResponse(text: string) {
@@ -69,14 +65,26 @@ function sanitizeTextResponse(text: string) {
   return cleaned;
 }
 
-async function runTextPrompt(prompt: string) {
-  const model = getAI();
+async function runTextPrompt(prompt: string, modelIndex = 0): Promise<string> {
+  const modelName = FALLBACK_MODELS[modelIndex];
+  if (!modelName) return TEXT_RESPONSE_FALLBACK;
+
+  const model = getAI(modelIndex);
   if (!model) return TEXT_RESPONSE_FALLBACK;
 
-  const request = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
-  const result = await model.generateContent(request);
-  const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return sanitizeTextResponse(text);
+  try {
+    const request = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+    const result = await model.generateContent(request);
+    const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return sanitizeTextResponse(text);
+  } catch (e: any) {
+    console.error(`Model ${modelName} failed:`, e.message);
+    if (modelIndex + 1 < FALLBACK_MODELS.length) {
+      console.log(`Falling back to ${FALLBACK_MODELS[modelIndex + 1]}...`);
+      return runTextPrompt(prompt, modelIndex + 1);
+    }
+    return `Analysis failed. Error: ${e.message}`;
+  }
 }
 
 async function buildGroundedPrompt(prompt: string, options: PromptRunOptions = {}) {
@@ -93,14 +101,16 @@ async function buildGroundedPrompt(prompt: string, options: PromptRunOptions = {
     ? `Optional knowledge grounding:
 Use the retrieved paper excerpts below as supporting evidence when they are relevant.
 Keep the answer primarily responsive to the user-provided audit context.
-If you rely on a retrieved excerpt in a rationale string, cite it inline as (Paper Title, p. X).
-Never cite file names. Use only the paper titles and page numbers shown below.
+If you rely on a retrieved excerpt in a rationale string, cite it inline using the exact Title name and page number, e.g., (Paper Title, p. X).
+Do NOT use generic labels like "Source 1" or "Source 2".
+Never cite file names. Use only the exact paper titles and page numbers shown below.
 Do not invent citations and do not cite pages that are not shown below.`
     : `Optional knowledge grounding:
 Use the retrieved paper excerpts below as supporting evidence when they are relevant.
 Keep your current response quality and do not turn this into a document-only bot.
-Whenever you directly quote or paraphrase a retrieved excerpt, cite it inline as (Paper Title, p. X).
-Never cite file names. Use only the paper titles and page numbers shown below.
+Whenever you directly quote or paraphrase a retrieved excerpt, cite it inline using the exact Title name and page number, e.g., (Paper Title, p. X).
+Do NOT use generic labels like "Source 1" or "Source 2".
+Never cite file names. Use only the exact paper titles and page numbers shown below.
 Do not invent citations and do not cite pages that are not shown below.
 If a statement comes only from the audit context and not from the papers, do not force a citation.`;
 
@@ -164,14 +174,26 @@ Explain the issues simply and directly.`;
   return runPrompt(prompt, { useKnowledgeBase: true });
 }
 
-export async function generateDeploymentDecision(context: any) {
-  const model = getAI();
-  if (!model) return {
-    status: "Unknown",
-    rationale: "LLM reasoning unavailable - GCP_PROJECT_ID required.",
-    recommendedActions: [],
-    unresolvedQuestions: []
-  };
+export async function generateDeploymentDecision(context: any, modelIndex = 0): Promise<any> {
+  const modelName = FALLBACK_MODELS[modelIndex];
+  if (!modelName) {
+    return {
+      status: "Error",
+      rationale: "Analysis failed: All fallback models were exhausted.",
+      recommendedActions: [],
+      unresolvedQuestions: []
+    };
+  }
+
+  const model = getAI(modelIndex);
+  if (!model) {
+    return {
+      status: "Unknown",
+      rationale: "LLM reasoning unavailable - GCP_PROJECT_ID required.",
+      recommendedActions: [],
+      unresolvedQuestions: []
+    };
+  }
   
   const prompt = `You are a sociotechnical bias auditor making a final deployment decision based on the following context:
 ${JSON.stringify(context, null, 2)}
@@ -189,17 +211,23 @@ DO NOT wrap in \`\`\`json. Return raw JSON.`;
     responseShape: 'json',
     useKnowledgeBase: true,
   });
-  const request = { contents: [{ role: 'user', parts: [{ text: groundedPrompt }] }] };
-  const result = await model.generateContent(request);
-  const text = result.response.candidates[0].content.parts[0].text;
   
   try {
-    const cleanedText = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    const request = { contents: [{ role: 'user', parts: [{ text: groundedPrompt }] }] };
+    const result = await model.generateContent(request);
+    const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    const cleanedText = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
     return JSON.parse(cleanedText || '{}');
-  } catch (e) {
+  } catch (e: any) {
+    console.error(`generateDeploymentDecision model ${modelName} failed:`, e.message);
+    if (modelIndex + 1 < FALLBACK_MODELS.length) {
+      console.log(`Falling back to ${FALLBACK_MODELS[modelIndex + 1]}...`);
+      return generateDeploymentDecision(context, modelIndex + 1);
+    }
     return {
       status: "Error",
-      rationale: "Failed to parse LLM response: " + text,
+      rationale: "Failed to parse LLM response or API error: " + e.message,
       recommendedActions: [],
       unresolvedQuestions: []
     };

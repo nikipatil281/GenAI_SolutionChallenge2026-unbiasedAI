@@ -228,7 +228,11 @@ export function ProjectSetup() {
     setSampleLoading(true);
 
     try {
-      const parsed = Papa.parse(sampleDefinition.csvText, {
+      setSampleLoading(true);
+      const response = await fetch(sampleDefinition.csvUrl);
+      const csvText = await response.text();
+
+      const parsed = Papa.parse(csvText, {
         header: true,
         skipEmptyLines: true,
         dynamicTyping: true,

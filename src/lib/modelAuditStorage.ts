@@ -16,6 +16,7 @@ export type ModelDatasetSummary = {
   rowCount: number;
   columnCount: number;
   columns: string[];
+  sampleData?: any[];
 };
 
 export type ModelExecutionResult = {

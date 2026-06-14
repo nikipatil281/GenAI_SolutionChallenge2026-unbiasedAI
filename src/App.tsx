@@ -11,7 +11,7 @@ import { ModelAuditPage } from './components/ModelAuditPage';
 import { AuthPage } from './components/AuthPage';
 import { AuditProvider } from './context/AuditContext';
 import { Toaster, toast } from 'sonner';
-import { clearAuthSession, createPasswordSession, readAuthSession, writeAuthSession, type AuthMode, type AuthSession } from './lib/auth';
+import { clearAuthSession, readAuthSession, signInWithGoogle, signInWithYahoo, signInWithEmail, signUpWithEmail, type AuthMode, type AuthSession, type AuthProvider as AuthProviderType } from './lib/auth';
 
 export default function App() {
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined);
@@ -35,19 +35,33 @@ export default function App() {
     };
   }, []);
 
-  function handleAuthenticate(email: string, _password: string, mode: AuthMode) {
-    const nextSession = createPasswordSession(email);
-    void writeAuthSession(nextSession);
-    setSession(nextSession);
-    setFlow('landing');
-    toast.success(mode === 'signup' ? 'Workspace created.' : 'Signed in successfully.');
+  async function handleAuthenticate(email: string, pass: string, mode: AuthMode, provider: AuthProviderType = 'password') {
+    try {
+      let nextSession;
+      if (provider === 'google') {
+        nextSession = await signInWithGoogle();
+      } else if (provider === 'yahoo') {
+        nextSession = await signInWithYahoo();
+      } else {
+        if (mode === 'login') {
+          nextSession = await signInWithEmail(email, pass);
+        } else {
+          nextSession = await signUpWithEmail(email, pass);
+        }
+      }
+      setSession(nextSession);
+      setFlow('landing');
+      toast.success('Successfully authenticated!');
+    } catch (error: any) {
+      toast.error(`Authentication failed: ${error.message}`);
+    }
   }
 
   function handleSignOut() {
     void clearAuthSession();
     setSession(null);
     setFlow('landing');
-    toast.message('Signed out of the local prototype session.');
+    toast.message('Signed out of BiasScope.');
   }
 
   return (

@@ -9,3 +9,4 @@ coverage/
 credentials.json
 __pycache__/
 *.pyc
+genai-solution-challenge-*.json

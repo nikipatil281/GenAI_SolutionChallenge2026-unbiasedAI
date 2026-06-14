@@ -1,33 +1,55 @@
+import { auth, db } from './firebase';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+
 export interface PersistenceDriver {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
 }
 
-class BrowserLocalStorageDriver implements PersistenceDriver {
+class FirestoreDriver implements PersistenceDriver {
   async getItem(key: string) {
-    if (typeof window === 'undefined') {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      if (key === 'biasscope.auth.session' && typeof window !== 'undefined') {
+        return window.localStorage.getItem(key);
+      }
       return null;
     }
-    return window.localStorage.getItem(key);
+    const docRef = doc(db, 'users', uid, 'state', key);
+    const snapshot = await getDoc(docRef);
+    if (snapshot.exists()) {
+      return snapshot.data().value as string;
+    }
+    return null;
   }
 
   async setItem(key: string, value: string) {
-    if (typeof window === 'undefined') {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      if (key === 'biasscope.auth.session' && typeof window !== 'undefined') {
+        window.localStorage.setItem(key, value);
+      }
       return;
     }
-    window.localStorage.setItem(key, value);
+    const docRef = doc(db, 'users', uid, 'state', key);
+    await setDoc(docRef, { value });
   }
 
   async removeItem(key: string) {
-    if (typeof window === 'undefined') {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      if (key === 'biasscope.auth.session' && typeof window !== 'undefined') {
+        window.localStorage.removeItem(key);
+      }
       return;
     }
-    window.localStorage.removeItem(key);
+    const docRef = doc(db, 'users', uid, 'state', key);
+    await deleteDoc(docRef);
   }
 }
 
-let persistenceDriver: PersistenceDriver = new BrowserLocalStorageDriver();
+let persistenceDriver: PersistenceDriver = new FirestoreDriver();
 
 export function configurePersistenceDriver(driver: PersistenceDriver) {
   persistenceDriver = driver;

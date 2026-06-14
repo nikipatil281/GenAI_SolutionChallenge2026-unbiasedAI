@@ -1,6 +1,6 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { Clock3, FileClock, FileStack, GitCompareArrows } from 'lucide-react';
+import { Clock3, FileClock, FileStack, GitCompareArrows, Info } from 'lucide-react';
 import type {
   ModelAuditRunEntry,
   ModelAuditSnapshot,
@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Tabs, TabsList, TabsTrigger } from '../ui/tabs';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
 
 function formatMetric(value?: number) {
   if (value === undefined || value === null || Number.isNaN(value)) {
@@ -19,6 +20,21 @@ function formatMetric(value?: number) {
   }
   return value.toFixed(3);
 }
+
+const MetricBadge = ({ label, value, tooltip }: { label: string, value: any, tooltip: string }) => (
+  <HoverCard>
+    <HoverCardTrigger className="cursor-help inline-block border-none bg-transparent p-0 m-0">
+      <Badge variant="outline" className="flex items-center gap-1">
+        <span>{label} {value}</span>
+        <Info className="h-3 w-3 text-[#141414]/50" />
+      </Badge>
+    </HoverCardTrigger>
+    <HoverCardContent className="w-64 text-xs font-sans text-left z-50 normal-case tracking-normal">
+      <p className="font-bold text-sm mb-1">{label}</p>
+      <p className="text-muted-foreground">{tooltip}</p>
+    </HoverCardContent>
+  </HoverCard>
+);
 
 function SnapshotHeader({ title, label, createdAt }: { title: string; label: string; createdAt: string }) {
   return (
@@ -231,10 +247,16 @@ function ExecutionView({
                       <p className="mt-1 text-lg font-bold">{column}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">DP Diff {formatMetric(metrics.demographicParityDifference)}</Badge>
-                      <Badge variant="outline">DP Ratio {formatMetric(metrics.demographicParityRatio)}</Badge>
+                      <MetricBadge label="DP Diff" value={formatMetric(metrics.demographicParityDifference)} tooltip="Demographic Parity Difference: The difference in positive prediction rates between groups. Ideal is 0." />
+                      <MetricBadge label="DP Ratio" value={formatMetric(metrics.demographicParityRatio)} tooltip="Demographic Parity Ratio: The ratio of positive prediction rates between groups. Ideal is 1." />
                       {metrics.equalOpportunityDifference !== undefined && (
-                        <Badge variant="outline">EO Diff {formatMetric(metrics.equalOpportunityDifference)}</Badge>
+                        <MetricBadge label="EO Diff" value={formatMetric(metrics.equalOpportunityDifference)} tooltip="Equal Opportunity Difference: Difference in True Positive Rates (TPR) between groups. Ideal is 0." />
+                      )}
+                      {metrics.averageOddsDifference !== undefined && (
+                        <MetricBadge label="Avg Odds" value={formatMetric(metrics.averageOddsDifference)} tooltip="Average Odds Difference: Average of difference in TPR and FPR between groups. Ideal is 0." />
+                      )}
+                      {metrics.errorRateDifference !== undefined && (
+                        <MetricBadge label="Err Diff" value={formatMetric(metrics.errorRateDifference)} tooltip="Error Rate Difference: Difference in overall error rates between groups. Ideal is 0." />
                       )}
                     </div>
                   </div>

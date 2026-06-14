@@ -3,6 +3,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { spawn } from "node:child_process";
+import { auth as adminAuth } from "./src/server/firebase-admin.ts";
 
 import { analyzeDataset, analyzeAssociations, calculateFairnessMetrics, createSubgroupSlices } from "./src/server/stats.ts";
 import { warmKnowledgeBase } from "./src/server/rag.ts";
@@ -170,6 +171,26 @@ async function startServer() {
   });
 
   app.use(express.json({ limit: "50mb" }));
+
+  // Firebase Auth Middleware
+  app.use("/api", async (req, res, next) => {
+    if (req.path === "/health") return next();
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized: Missing or invalid token" });
+    }
+
+    const token = authHeader.split("Bearer ")[1];
+    try {
+      const decodedToken = await adminAuth.verifyIdToken(token);
+      (req as any).user = decodedToken;
+      next();
+    } catch (error) {
+      console.error("Error verifying token:", error);
+      return res.status(401).json({ error: "Unauthorized: Invalid token" });
+    }
+  });
 
   // API Routes
   app.get("/api/health", (req, res) => {

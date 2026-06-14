@@ -2,8 +2,12 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { Storage } from '@google-cloud/storage';
 
 const execFileAsync = promisify(execFile);
+const storage = new Storage();
+const RAG_BUCKET_NAME = process.env.RAG_BUCKET_NAME || 'genai-solution-challenge-knowledge-base';
+
 
 const KNOWLEDGE_DIR = path.join(process.cwd(), 'knowledge');
 const CACHE_PATH = path.join(KNOWLEDGE_DIR, '.rag-index.json');
@@ -419,7 +423,32 @@ async function buildIndexFromPdfs(fileSignatures: KnowledgeFileSignature[]) {
   return cachedIndex;
 }
 
+async function syncKnowledgeFromCloud() {
+  try {
+    await fs.mkdir(KNOWLEDGE_DIR, { recursive: true });
+    const [files] = await storage.bucket(RAG_BUCKET_NAME).getFiles();
+    
+    let downloadedCount = 0;
+    for (const file of files) {
+      const destination = path.join(KNOWLEDGE_DIR, file.name);
+      try {
+        await fs.access(destination);
+      } catch {
+        await file.download({ destination });
+        downloadedCount++;
+      }
+    }
+    if (downloadedCount > 0) {
+      console.log(`[RAG] Synced ${downloadedCount} new knowledge files from cloud bucket.`);
+    }
+  } catch (error) {
+    console.warn('[RAG] Failed to sync knowledge from cloud bucket. Falling back to local files if they exist:', error);
+  }
+}
+
 async function loadKnowledgeIndex() {
+  await syncKnowledgeFromCloud();
+  
   const fileSignatures = await getKnowledgeFileSignatures();
   const cachedIndex = await readCacheFile();
 
